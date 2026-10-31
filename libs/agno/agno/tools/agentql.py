@@ -11,6 +11,26 @@ except ImportError:
     raise ImportError("`agentql` not installed. Please install using `pip install agentql`")
 
 
+def _collect_response_text(value: Any, collected: List[str]) -> None:
+    """Collect the text content from an AgentQL response value.
+
+    The response maps the query's field names to their scraped content; list
+    fields hold their items and nested blocks hold further mappings.
+
+    Args:
+        value: A response value: a mapping, a list, or a leaf.
+        collected: The list to append the text items to.
+    """
+    if isinstance(value, dict):
+        for nested in value.values():
+            _collect_response_text(nested, collected)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _collect_response_text(item, collected)
+    elif value is not None and str(value).strip():
+        collected.append(str(value))
+
+
 class AgentQLTools(Toolkit):
     def __init__(
         self,
@@ -104,12 +124,13 @@ class AgentQLTools(Toolkit):
                     # Get response from AgentQL query
                     response = page.query_data(self.agentql_query)
 
-                    # Extract text based on response format
+                    # Extract the scraped values from the response, which maps
+                    # the query's field names to their content.
                     if isinstance(response, dict):
-                        items = [item for item in response]
-                        text_items = [text_item for text_item in items if text_item]
+                        text_items: List[str] = []
+                        _collect_response_text(response, text_items)
 
-                        deduplicated = list(set(text_items))
+                        deduplicated = list(dict.fromkeys(text_items))
                         return " ".join(deduplicated)
 
                 except Exception as e:

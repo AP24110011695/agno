@@ -1,6 +1,6 @@
 """Unit tests for AgentQLTools class."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -22,22 +22,27 @@ from agno.tools.agentql import AgentQLTools
 
 @pytest.fixture
 def mock_playwright():
-    """Create a mock Playwright instance."""
+    """Create a mock Playwright instance.
+
+    The browser is entered as a context manager by the tools, so the mock
+    must support the protocol (MagicMock) and yield itself on __enter__.
+    """
     with patch("agno.tools.agentql.sync_playwright") as mock_pw:
-        mock_browser = Mock()
+        mock_browser = MagicMock()
         mock_page = Mock()
+        mock_browser.__enter__.return_value = mock_browser
         mock_browser.new_page.return_value = mock_page
         mock_pw.return_value.__enter__.return_value.chromium.launch.return_value = mock_browser
-        return mock_pw
+        yield mock_pw
 
 
 @pytest.fixture
 def mock_agentql():
     """Create a mock AgentQL wrapper."""
-    with patch("agno.tools.agentql.agentql") as mock_agentql:
+    with patch("agno.tools.agentql.agentql") as mock_agentql_module:
         wrapped_page = Mock()
-        mock_agentql.wrap.return_value = wrapped_page
-        return mock_agentql, wrapped_page
+        mock_agentql_module.wrap.return_value = wrapped_page
+        yield mock_agentql_module, wrapped_page
 
 
 @pytest.fixture
@@ -80,7 +85,6 @@ def test_custom_scrape_no_query(agentql_tools):
     assert "Custom AgentQL query not provided" in result
 
 
-@pytest.mark.skip(reason="This test doesn't mock playwright module correctly.")
 def test_scrape_website_success(mock_playwright, mock_agentql, agentql_tools):
     """Test successful website scraping."""
     # Unpack the mock_agentql fixture
@@ -107,3 +111,33 @@ def test_scrape_website_success(mock_playwright, mock_agentql, agentql_tools):
     assert "Example Domain" in result
     assert "This domain is for use in illustrative examples" in result
     assert isinstance(result, str)
+
+
+def test_custom_scrape_returns_values_not_keys(mock_playwright, mock_agentql):
+    """The scraped values are returned, not the query's field names."""
+    _, wrapped_page = mock_agentql
+    wrapped_page.query_data.return_value = {"title": "AgentQL Guide", "price": "$9.99"}
+
+    with patch.dict("os.environ", {"AGENTQL_API_KEY": "test_key"}):
+        tools = AgentQLTools(agentql_query="{ title price }")
+    result = tools.custom_scrape_website("https://example.com")
+
+    assert result == "AgentQL Guide $9.99"
+
+
+def test_custom_scrape_flattens_lists_and_blocks(mock_playwright, mock_agentql):
+    """List values and nested blocks contribute their items to the text."""
+    _, wrapped_page = mock_agentql
+    wrapped_page.query_data.return_value = {
+        "items": ["first", "second"],
+        "block": {"inner": "nested text", "empty": None},
+    }
+
+    with patch.dict("os.environ", {"AGENTQL_API_KEY": "test_key"}):
+        tools = AgentQLTools(agentql_query="{ items[] block { inner } }")
+    result = tools.custom_scrape_website("https://example.com")
+
+    assert "first" in result
+    assert "second" in result
+    assert "nested text" in result
+    assert "None" not in result
