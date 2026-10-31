@@ -242,13 +242,19 @@ class LinearTools(Toolkit):
             logger.exception(f"Error creating issue '{title}' for team ID {team_id}")
             raise
 
-    def update_issue(self, issue_id: str, title: Optional[str]) -> Optional[str]:
+    def update_issue(
+        self,
+        issue_id: str,
+        title: Optional[str] = None,
+        state_id: Optional[str] = None,
+    ) -> Optional[str]:
         """
         Update the title or state of a specific issue by issue ID.
 
         Args:
             issue_id (str): The unique identifier of the issue to update.
             title (str, optional): The new title for the issue. If None, the title remains unchanged.
+            state_id (str, optional): The ID of the workflow state to move the issue to. If None, the state remains unchanged.
 
         Returns:
             str or None: A string containing the updated issue's details with issue id, issue title, and issue state (which includes `id` and `name`).
@@ -258,11 +264,18 @@ class LinearTools(Toolkit):
             Exception: If an error occurs during the mutation execution or data retrieval.
         """
 
+        input_fields = {"title": title, "stateId": state_id}
+        update_input = {field: value for field, value in input_fields.items() if value is not None}
+
+        if not update_input:
+            log_error(f"No fields to update for issue ID {issue_id}. Provide title and/or state_id.")
+            return None
+
         query = """
-        mutation IssueUpdate ($issueId: String!, $title: String!){
+        mutation IssueUpdate ($issueId: String!, $input: IssueUpdateInput!){
           issueUpdate(
             id: $issueId,
-            input: { title: $title}
+            input: $input
           ) {
             success
             issue {
@@ -276,7 +289,7 @@ class LinearTools(Toolkit):
           }
         }
         """
-        variables = {"issueId": issue_id, "title": title}
+        variables = {"issueId": issue_id, "input": update_input}
 
         try:
             response = self._execute_query(query, variables)
